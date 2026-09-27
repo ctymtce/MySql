@@ -802,19 +802,20 @@ class Mypdb:
         table: str,
         whArr: Any = None,
         exArr: Mapping[str, Any] | None = None,
+        outes: list[int] | None = None, #接收总数(不能在函数内部重新赋值，否则外部无法获取)
     ) -> list[dict[str, Any]] | bool:
-        """查询多行；非 ``only_data`` 时同时更新 ``last_total``。"""
+        """查询多行；非 ``only_data`` 时同时更新 ``total``。"""
         exArr = dict(exArr or {})
         where_sql, params = self._parse_where(whArr)
         exArr["where"] = where_sql
         if not exArr.get("only_data"):
             count_options = dict(exArr)
             count_options.pop("where", None)
-            self.last_total = self.count(table, whArr, count_options)
-            if self.last_total == 0:
-                return []
+            total = self.count(table, whArr, count_options)
+            outes.append(total)
+            if 0 == total: return []
         else:
-            self.last_total = None
+            outes.append(None)
         sql = self.mkQuery(table, exArr)
         result = self.execute(sql, 0, True, params)
         return result if isinstance(result, list) else False
@@ -829,7 +830,7 @@ class Mypdb:
         exArr = dict(exArr or {})
         exArr["limit"] = 1
         exArr["only_data"] = True
-        rows = self.getAll(table, whArr, exArr)
+        rows = self.getMore(table, whArr, exArr)
         if isinstance(rows, list):
             return rows[0] if rows else None
         return rows
@@ -1561,7 +1562,7 @@ class Mysql(Mypdb):
         table: str,
         whArr: Any = None,
         exArr: Mapping[str, Any] | None = None,
-        total: list[int] | None = None,
+        outes: list[int] | None = None,
     ) -> list[dict[str, Any]] | bool:
         """查询多行，并支持分页、别名、keyas 和递归 join 组装。"""
         if not isinstance(table, str):
@@ -1580,7 +1581,9 @@ class Mysql(Mypdb):
             whArr = self._scalar_to_primary(table, whArr)
 
         exArr["only_data"] = bool(exArr.get("only_data", False))
-        rows = self.getAll(table, whArr, exArr)
+        tList = []
+        rows = self.getAll(table, whArr, exArr, tList)
+        total = tList.pop() if tList else None
         if not isinstance(rows, list):
             return rows
         else:
@@ -1590,7 +1593,7 @@ class Mysql(Mypdb):
                         if isinstance(value, (_datetime.datetime, _datetime.date, _datetime.time)):
                             row[field] = value.strftime("%Y-%m-%d %H:%M:%S")
         if total is not None:
-            total.append(int(self.last_total or 0))
+            outes.append(int(total or 0))
         if not rows:
             return rows
 
@@ -1613,9 +1616,17 @@ class Mysql(Mypdb):
             rows = self._field_as_key(rows, str(exArr["keyas"]))
         return rows
 
-    def GetTotal(self) -> int | None:
-        """返回上次查询的总数；仅在 ``GetMore`` 时有效。"""
-        return self.last_total
+    def GetList(
+            self,
+            table: str,
+            whArr: Any = None,
+            exArr: Mapping[str, Any] | None = None,
+        ) -> tuple[list[dict[str, Any]], int]:
+        """兼容 ``GetMore`` 的别名。"""
+        out_total = []
+        rows = self.GetMore(table, whArr, exArr, out_total)
+        total = out_total[0] if out_total else 0
+        return rows, total
 
     def GetData(
         self,
